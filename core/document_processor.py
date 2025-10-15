@@ -3,6 +3,7 @@ import docx
 from loguru import logger
 import requests
 import os
+import shutil
 import zipfile
 import pandas as pd
 from pptx import Presentation
@@ -111,6 +112,165 @@ class DocumentProcessor:
             logger.error(f"Unsupported document type for file: {file_name}")
             raise ValueError(f"Unsupported document type: {file_name}")
 
+    def extract_clauses_with_pages(self, doc_url: str) -> list[dict]:
+        """Extract clauses with page/slide numbers when possible.
+        Returns list of {"text": str, "page": int|None}
+        """
+        parsed_url = urlparse(doc_url)
+        file_name = os.path.basename(parsed_url.path)
+        file_extension = os.path.splitext(file_name.lower())[1]
+
+        results: list[dict] = []
+
+        try:
+            if file_extension == ".pdf":
+                temp_file = self._download_file(doc_url, ".pdf")
+                try:
+                    # First attempt: PyPDF2 text extraction per page
+                    try:
+                        with open(temp_file, "rb") as f:
+                            reader = PyPDF2.PdfReader(f)
+                            for idx, page in enumerate(reader.pages, start=1):
+                                page_text = (page.extract_text() or "").strip()
+                                if not page_text:
+                                    continue
+                                paragraphs = page_text.split('\n\n')
+                                for para in paragraphs:
+                                    sentences = para.strip().split('. ')
+                                    for s in sentences:
+                                        s_clean = s.strip()
+                                        if s_clean:
+                                            if not s_clean.endswith(('.', '!', '?')):
+                                                s_clean += '.'
+                                            results.append({"text": s_clean, "page": idx})
+                    except Exception as e:
+                        logger.warning(f"PyPDF2 per-page extraction failed: {e}")
+
+                    # Fallback 1: PyMuPDF (fitz) per-page text extraction
+                    if len(results) == 0:
+                        try:
+                            import fitz  # type: ignore
+                            doc = fitz.open(temp_file)
+                            try:
+                                for idx in range(len(doc)):
+                                    page = doc.load_page(idx)
+                                    page_text = (page.get_text("text") or "").strip()
+                                    if not page_text:
+                                        continue
+                                    paragraphs = page_text.split('\n\n')
+                                    for para in paragraphs:
+                                        sentences = para.strip().split('. ')
+                                        for s in sentences:
+                                            s_clean = s.strip()
+                                            if s_clean:
+                                                if not s_clean.endswith(('.', '!', '?')):
+                                                    s_clean += '.'
+                                                results.append({"text": s_clean, "page": idx + 1})
+                            finally:
+                                try:
+                                    doc.close()
+                                except Exception:
+                                    pass
+                        except Exception as e:
+                            logger.warning(f"PyMuPDF extraction not available/failed: {e}")
+
+                    # Fallback 2: OCR each page image if still empty
+                    if len(results) == 0:
+                        try:
+                            import fitz  # type: ignore
+                            doc = fitz.open(temp_file)
+                            try:
+                                for idx in range(len(doc)):
+                                    page = doc.load_page(idx)
+                                    pix = page.get_pixmap(dpi=200)
+                                    img_bytes = pix.tobytes("png")
+                                    image = Image.open(io.BytesIO(img_bytes))
+                                    try:
+                                        ocr_text = pytesseract.image_to_string(image)
+                                    finally:
+                                        try:
+                                            image.close()
+                                        except Exception:
+                                            pass
+                                    ocr_text = (ocr_text or "").strip()
+                                    if not ocr_text:
+                                        continue
+                                    paragraphs = ocr_text.split('\n\n')
+                                    for para in paragraphs:
+                                        sentences = para.strip().split('. ')
+                                        for s in sentences:
+                                            s_clean = s.strip()
+                                            if s_clean:
+                                                if not s_clean.endswith(('.', '!', '?')):
+                                                    s_clean += '.'
+                                                results.append({"text": s_clean, "page": idx + 1})
+                            finally:
+                                try:
+                                    doc.close()
+                                except Exception:
+                                    pass
+                        except Exception as e:
+                            logger.warning(f"OCR fallback failed: {e}")
+                finally:
+                    self._safe_remove_file(temp_file)
+                logger.info(f"Extracted {len(results)} clauses with pages from PDF")
+                return results
+            elif file_extension in [".pptx", ".ppt"]:
+                temp_file = self._download_file(doc_url, ".pptx")
+                try:
+                    prs = Presentation(temp_file)
+                    for slide_num, slide in enumerate(prs.slides, start=1):
+                        # Collect text from shapes and tables
+                        slide_parts: list[str] = []
+                        for shape in slide.shapes:
+                            if hasattr(shape, "text") and shape.text.strip():
+                                slide_parts.append(shape.text.strip())
+                            if shape.has_table:
+                                table = shape.table
+                                for row in table.rows:
+                                    row_text = []
+                                    for cell in row.cells:
+                                        if cell.text.strip():
+                                            row_text.append(cell.text.strip())
+                                    if row_text:
+                                        slide_parts.append(" | ".join(row_text))
+                        # Split into pseudo-sentences
+                        for chunk in slide_parts:
+                            for s in chunk.split('. '):
+                                s_clean = s.strip()
+                                if s_clean:
+                                    if not s_clean.endswith(('.', '!', '?')):
+                                        s_clean += '.'
+                                    results.append({"text": s_clean, "page": slide_num})
+                finally:
+                    self._safe_remove_file(temp_file)
+                logger.info(f"Extracted {len(results)} clauses with pages from PPTX")
+                return results
+            else:
+                # Fallback for other types: no page info
+                text = self.extract_text(doc_url)
+                paragraphs = text.split('\n\n')
+                for para in paragraphs:
+                    sentences = para.strip().split('. ')
+                    for s in sentences:
+                        s_clean = s.strip()
+                        if s_clean:
+                            if not s_clean.endswith(('.', '!', '?')):
+                                s_clean += '.'
+                            results.append({"text": s_clean, "page": None})
+                if len(results) == 0:
+                    # Line-based fallback
+                    for l in [l.strip() for l in text.split('\n') if l.strip()]:
+                        if len(l) >= 20:
+                            results.append({"text": l if l.endswith(('.', '!', '?')) else (l + '.') , "page": None})
+                logger.info(f"Extracted {len(results)} clauses (no pages) from generic file")
+                return results
+        except Exception as e:
+            logger.error(f"Error extracting clauses with pages: {e}")
+            # Fallback to simple text
+            text = self.extract_text(doc_url)
+            return [{"text": text, "page": None}]
+
     def _generate_temp_filename(self, extension: str) -> str:
         """Generate a unique temporary filename"""
         unique_id = str(uuid.uuid4())
@@ -118,11 +278,32 @@ class DocumentProcessor:
         return f"temp_{timestamp}_{unique_id}{extension}"
 
     def _download_file(self, doc_url: str, extension: str) -> str:
-        """Download file from URL and return local path"""
+        """Download file from URL and return local path.
+        Also supports local filesystem paths and file:// URLs by copying into temp.
+        """
         temp_filename = self._generate_temp_filename(extension)
         temp_file = os.path.join(self.temp_dir, temp_filename)
         
         try:
+            # Handle local filesystem paths
+            if os.path.exists(doc_url):
+                shutil.copyfile(doc_url, temp_file)
+                logger.info(f"Copied local file to: {temp_file}")
+                return temp_file
+
+            # Handle file:// URLs
+            if doc_url.startswith('file://'):
+                from urllib.parse import urlparse
+                parsed = urlparse(doc_url)
+                local_path = parsed.path
+                # On Windows, urlparse yields paths like /C:/path -> strip leading slash
+                if os.name == 'nt' and local_path.startswith('/') and len(local_path) > 3 and local_path[2] == ':':
+                    local_path = local_path[1:]
+                if os.path.exists(local_path):
+                    shutil.copyfile(local_path, temp_file)
+                    logger.info(f"Copied file:// to: {temp_file}")
+                    return temp_file
+
             # Check file size before downloading
             response = requests.head(doc_url, timeout=10)
             response.raise_for_status()
@@ -157,7 +338,7 @@ class DocumentProcessor:
         """Safely remove a file with retries"""
         if max_retries is None:
             max_retries = TEMP_FILE_CLEANUP_RETRIES
-            
+        
         for attempt in range(max_retries):
             try:
                 if os.path.exists(file_path):
@@ -167,8 +348,24 @@ class DocumentProcessor:
             except PermissionError as e:
                 if attempt < max_retries - 1:
                     logger.warning(f"File {file_path} is locked, retrying in {TEMP_FILE_CLEANUP_DELAY} second... (attempt {attempt + 1})")
+                    try:
+                        import gc
+                        gc.collect()
+                    except Exception:
+                        pass
                     time.sleep(TEMP_FILE_CLEANUP_DELAY)
                 else:
+                    # Final attempt: try to rename then remove (helps break locks on Windows)
+                    try:
+                        temp_rename = file_path + f".del_{int(time.time())}"
+                        os.replace(file_path, temp_rename)
+                        try:
+                            os.remove(temp_rename)
+                            logger.debug(f"Removed after rename: {temp_rename}")
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
                     logger.error(f"Failed to remove {file_path} after {max_retries} attempts: {e}")
             except Exception as e:
                 logger.error(f"Error removing {file_path}: {e}")

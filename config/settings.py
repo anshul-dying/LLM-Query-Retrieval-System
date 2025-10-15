@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # OpenRouter API Configuration (optional for deployment)
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
 OPENROUTER_REFERER = os.getenv("OPENROUTER_REFERER", "https://example.com")
 
 # Local LLM Configuration (disabled by default on remote hosts)

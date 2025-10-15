@@ -5,6 +5,7 @@ import time
 import hashlib
 import json
 import os
+import re
 
 class LLMClient:
     def __init__(self):
@@ -29,6 +30,29 @@ class LLMClient:
             "meta-llama/llama-3.1-8b-instruct:free"
         ]
         self.current_model_index = 0
+
+    def _strip_hidden_thoughts(self, text: str) -> str:
+        """Remove hidden reasoning tags like <think>..</think> and similar."""
+        if not text:
+            return ""
+        cleaned = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE)
+        cleaned = re.sub(r"</?(analysis|reasoning|scratchpad)>", "", cleaned, flags=re.IGNORECASE)
+        return cleaned.strip()
+
+    def _normalize(self, text: str) -> str:
+        """Normalize whitespace and strip hidden thoughts, without hard line limits."""
+        if not text:
+            return ""
+        normalized = (
+            text.replace("\r\n", "\n")
+            .replace("\t", " ")
+            .strip()
+        )
+        return normalized
+
+    def _postprocess_answer(self, answer: str) -> str:
+        """Strip hidden thoughts and normalize output without truncation."""
+        return self._normalize(self._strip_hidden_thoughts(answer))
 
     def _load_cache(self):
         """Load response cache from file"""
@@ -66,13 +90,23 @@ class LLMClient:
     def _try_local_llm(self, prompt: str) -> tuple[bool, str]:
         """Try local LLM using Ollama"""
         try:
+            # Wrap user prompt with clear system-style instruction to avoid chain-of-thought
+            instruction = (
+                "You are a helpful AI assistant. Provide a clear, direct answer without hidden thoughts,"
+                " analysis, or <think> tags. Provide only the final answer.\n\n"
+            )
+            wrapped_prompt = f"{instruction}Question: {prompt}\nAnswer:"
+
             payload = {
                 "model": self.local_model,
-                "prompt": prompt,
+                "prompt": wrapped_prompt,
                 "stream": False,
+                # Some Ollama models respect these options to curb verbose reasoning
                 "options": {
                     "temperature": 0.3,
-                    "num_predict": 150
+                    "num_predict": 600,
+                    # Stop if the model starts emitting hidden-thought tags
+                    "stop": ["</think>", "<think>", "<analysis>", "</analysis>"],
                 }
             }
             
@@ -82,7 +116,7 @@ class LLMClient:
                 result = response.json()
                 answer = result.get("response", "").strip()
                 if answer:
-                    return True, answer
+                    return True, self._postprocess_answer(answer)
                 else:
                     return False, "empty_response"
             else:
@@ -157,20 +191,23 @@ class LLMClient:
             payload = {
                 "model": model,
                 "messages": [
-                    {"role": "system", "content": "You are an insurance policy assistant. Answer questions based on the provided policy clauses. Provide direct, concise answers in 2-3 lines maximum. Do not include thinking processes, explanations, or verbose text. Give only the factual answer."},
+                    {"role": "system", "content": "You are a helpful AI assistant. Answer comprehensively but concisely. Do not include chain-of-thought, hidden thoughts, or <think> tags. Provide only the final answer."},
                     {"role": "user", "content": prompt}
                 ],
-                "max_tokens": 150,
-                "temperature": 0.3
+                "max_tokens": 600,
+                "temperature": 0.3,
+                # Some providers honor stop sequences in chat completions
+                "stop": ["</think>", "<think>", "<analysis>", "</analysis>"]
             }
             
             success, result = self._try_model(payload, headers)
             
             if success:
                 # Cache the response
-                self._cache_response(prompt, result)
+                final_answer = self._postprocess_answer(result)
+                self._cache_response(prompt, final_answer)
                 logger.info(f"Generated response using cloud model: {model}")
-                return result
+                return final_answer
             elif result == "rate_limited":
                 # Try next model
                 self.current_model_index = (self.current_model_index + 1) % len(self.models)
@@ -187,13 +224,13 @@ class LLMClient:
     def generate_batch_responses(self, questions_with_context: list[dict]) -> list[str]:
         """Generate responses for multiple questions in a single API call"""
         # Create batch prompt
-        batch_prompt = "Answer each question based on the provided context. Give concise 2-3 line answers only.\n\n"
+        batch_prompt = "Answer each question based on the provided context. Give concise 2-line answers only.\n\n"
         
         for i, q_data in enumerate(questions_with_context, 1):
             if q_data['has_context']:
                 batch_prompt += f"Question {i}: {q_data['question']}\nContext: {q_data['context']}\n"
             else:
-                batch_prompt += f"Question {i}: {q_data['question']}\nContext: General insurance knowledge\n"
+                batch_prompt += f"Question {i}: {q_data['question']}\nContext: General knowledge\n"
             batch_prompt += "Answer: "
             if i < len(questions_with_context):
                 batch_prompt += "\n\n"
@@ -238,20 +275,22 @@ class LLMClient:
             payload = {
                 "model": model,
                 "messages": [
-                    {"role": "system", "content": "You are an insurance policy assistant. Answer questions based on the provided context. Provide direct, concise answers in 2-3 lines maximum. Do not include thinking processes, explanations, or verbose text. Give only the factual answer."},
+                    {"role": "system", "content": "You are a helpful AI assistant. "},
                     {"role": "user", "content": batch_prompt}
                 ],
                 "max_tokens": 800,  # Increased for batch processing
-                "temperature": 0.3
+                "temperature": 0.3,
+                "stop": ["</think>", "<think>", "<analysis>", "</analysis>"]
             }
             
             success, result = self._try_model(payload, headers)
             
             if success:
                 # Cache the response
-                self._cache_response(batch_prompt, result)
+                final_answer = self._postprocess_answer(result)
+                self._cache_response(batch_prompt, final_answer)
                 # Parse batch response into individual answers
-                answers = self._parse_batch_response(result, len(questions_with_context))
+                answers = self._parse_batch_response(final_answer, len(questions_with_context))
                 logger.info(f"Generated batch responses using cloud model: {model}")
                 return answers
             elif result == "rate_limited":

@@ -10,6 +10,7 @@ sentence-transformers
 torch
 python-dotenv
 PyPDF2
+PyMuPDF
 python-docx
 pandas
 openpyxl

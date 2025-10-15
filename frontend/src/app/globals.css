@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+:root {
+  /* Base */
+  --background: #ffffff;
+  --foreground: #111827;
+  /* gray-900 */
+
+  /* Semantic */
+  --surface: #ffffff;
+  --border: #e5e7eb;
+  /* gray-200 */
+  --muted: #6b7280;
+  /* gray-600 */
+  --link: #2563eb;
+  /* blue-600 */
+  --primary: #111827;
+  /* gray-900 */
+  --primary-hover: #1f2937;
+  /* gray-800 */
+  --disabled: #d1d5db;
+  /* gray-300 */
+  --accent: #f3f4f6;
+  /* gray-100 */
+  --danger: #dc2626;
+  /* red-600 */
+  --danger-bg: #fef2f2;
+  /* red-50 */
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-link: var(--link);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-disabled: var(--disabled);
+  --color-accent: var(--accent);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #e5e7eb;
+    /* gray-200 */
+
+    --surface: #111827;
+    /* gray-900 panel */
+    --border: #1f2937;
+    /* gray-800 */
+    --muted: #a3a3a3;
+    /* zinc-400 */
+    --link: #60a5fa;
+    /* blue-400 */
+    --primary: #e5e7eb;
+    /* text on dark */
+    --primary-hover: #f3f4f6;
+    /* slightly lighter */
+    --disabled: #374151;
+    /* gray-700 */
+    --accent: #1f2937;
+    /* gray-800 */
+    --danger: #f87171;
+    /* red-400 */
+    --danger-bg: #2b0e0e;
+    /* dark red tint */
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}

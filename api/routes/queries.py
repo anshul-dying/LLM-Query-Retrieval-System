@@ -21,28 +21,30 @@ async def process_queries(request: QueryRequest):
         
         if not doc_id:
             logger.info(f"Ingesting document {request.documents} for query processing")
-            extracted_text = processor.extract_text(request.documents)
-            paragraphs = extracted_text.split('\n\n')
-            clauses = []
-            for para in paragraphs:
-                sentences = para.strip().split('. ')
-                clauses.extend([s.strip() + '.' for s in sentences if s.strip()])
+            # Use per-page extractor to preserve page numbers
+            clauses_with_pages = processor.extract_clauses_with_pages(request.documents)
+            clauses = [c["text"] for c in clauses_with_pages]
+            pages = [c.get("page") for c in clauses_with_pages]
             max_clause_size = 40000
             chunked_clauses = []
-            for clause in clauses:
-                if len(clause.encode('utf-8')) > max_clause_size:
-                    words = clause.split()
+            chunked_pages = []
+            for clause_text, clause_page in zip(clauses, pages):
+                if len(clause_text.encode('utf-8')) > max_clause_size:
+                    words = clause_text.split()
                     current_chunk = ""
                     for word in words:
                         if len((current_chunk + " " + word).encode('utf-8')) > max_clause_size:
                             chunked_clauses.append(current_chunk.strip())
+                            chunked_pages.append(clause_page)
                             current_chunk = word
                         else:
                             current_chunk += " " + word
                     if current_chunk:
                         chunked_clauses.append(current_chunk.strip())
+                        chunked_pages.append(clause_page)
                 else:
-                    chunked_clauses.append(clause)
+                    chunked_clauses.append(clause_text)
+                    chunked_pages.append(clause_page)
             filename = request.documents.split("/")[-1]
             doc_id = sqlite.store_document(request.documents, filename)
             
@@ -50,8 +52,8 @@ async def process_queries(request: QueryRequest):
             logger_manager.log_document_link(request.documents, doc_id, filename)
             
             embedding_generator = EmbeddingGenerator()
-            vector_ids = embedding_generator.generate_embeddings(chunked_clauses, doc_id)
-            sqlite.store_clauses(doc_id, chunked_clauses, vector_ids)
+            vector_ids = embedding_generator.generate_embeddings(chunked_clauses, doc_id, pages=chunked_pages)
+            sqlite.store_clauses(doc_id, chunked_clauses, vector_ids, pages=chunked_pages)
             logger.info(f"Ingested document {request.documents}, doc_id: {doc_id}")
         else:
             # For existing documents, check if it's a secret token URL

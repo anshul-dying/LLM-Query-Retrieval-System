@@ -33,7 +33,7 @@ class DecisionEngine:
                 continue
             
             # Process normal questions
-            normal_answer = self._process_normal_query(question, doc_id)
+            normal_answer = self._process_normal_query(question, doc_id, doc_name)
             answers.append(normal_answer)
         
         return answers
@@ -190,7 +190,7 @@ class DecisionEngine:
             logger.error(f"Error getting flight number for landmark {landmark}: {e}")
             return None
 
-    def _process_normal_query(self, query: str, doc_id: int) -> str:
+    def _process_normal_query(self, query: str, doc_id: int, doc_name: str | None = None) -> str | dict:
         """Process normal queries using existing logic"""
         logger.info(f"Processing query: {query}")
         
@@ -203,22 +203,75 @@ class DecisionEngine:
         
         # If no predefined answer, proceed with normal processing
         matched_clauses = self.clause_matcher.match_clause(query, return_multiple=True, doc_id=doc_id)
+
+        # Heuristic boost: prioritize clauses containing known section headers or accuracy cues
+        boost_terms = [
+            "result", "results", "findings", "evaluation", "metrics", "performance",
+            "accuracy", "%", "precision", "recall", "f1", "f1-score", "f1 score"
+        ]
+        if matched_clauses:
+            def score_boost(item: dict) -> float:
+                clause_text = (item.get("clause") or "").lower()
+                bonus = 0.0
+                for term in boost_terms:
+                    if term in clause_text:
+                        bonus += 0.05
+                # Slightly reward shorter clauses for succinct references
+                length_penalty = min(len(clause_text) / 2000.0, 0.1)
+                return item.get("score", 0.0) + bonus - length_penalty
+            matched_clauses = sorted(matched_clauses, key=score_boost, reverse=True)
         
         if not matched_clauses:
             logger.warning(f"No similar clauses found for query: {query}")
+            # Try a more lenient search to fetch at least one clause and page
+            try_any = self.clause_matcher.embedding_generator.search_any_clause(query, top_k=1, doc_id=doc_id)
+            page_hint = try_any[0].get("page") if try_any else None
+            clause_hint = try_any[0].get("clause") if try_any else None
             # Fallback for questions without context
-            prompt = f"Question: {query}\n\nAnswer in 2-3 lines maximum based on general insurance knowledge:"
+            prompt = f"You are a helpful AI assistant. Provide a clear, factual answer.\n\nQuestion: {query}\nAnswer:"
             response = self.llm_client.generate_response(prompt)
             if response and response != "Unable to generate response due to an error.":
-                return response.strip()
+                return {
+                    "answer": response.strip(),
+                    "references": [
+                        {
+                            "doc_id": doc_id or 0,
+                            "doc_name": doc_name,
+                            "doc_url": doc_name,
+                            "page": page_hint,
+                            "clause": clause_hint,
+                            "score": None,
+                        }
+                    ],
+                }
             else:
-                return "No specific information found in the document for this question."
+                return {
+                    "answer": "No specific information found in the document for this question.",
+                    "references": [],
+                }
         else:
-            context = "\n".join([clause["clause"] for clause in matched_clauses[:3]])
+            context = "\n".join([clause["clause"] for clause in matched_clauses[:5]])
             # Questions with context
-            prompt = f"Policy Clauses:\n{context}\n\nQuestion: {query}\n\nAnswer in 2-3 lines maximum based on the clauses above:"
+            prompt = (
+                f"Context:\n{context}\n\nQuestion: {query}\n\n"
+                f"Answer using only the provided context. Be concise but complete."
+            )
             response = self.llm_client.generate_response(prompt)
             if response and response != "Unable to generate response due to an error.":
-                return response.strip()
+                # Build references with page if available
+                refs = []
+                for clause in matched_clauses[:5]:
+                    refs.append({
+                        "doc_id": doc_id or 0,
+                        "doc_name": doc_name,
+                        "doc_url": doc_name,
+                        "page": clause.get("page"),
+                        "clause": clause.get("clause"),
+                        "score": clause.get("score"),
+                    })
+                return {"answer": response.strip(), "references": refs}
             else:
-                return "Unable to generate response for this question."
+                return {
+                    "answer": "Unable to generate response for this question.",
+                    "references": [],
+                }

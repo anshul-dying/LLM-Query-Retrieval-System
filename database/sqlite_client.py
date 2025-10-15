@@ -24,9 +24,19 @@ class SQLiteClient:
                         doc_id INTEGER,
                         clause_text TEXT,
                         vector_id TEXT,
+                        page INTEGER,
                         FOREIGN KEY (doc_id) REFERENCES documents (id)
                     )
                 """)
+                # Backward-compatible migration: ensure 'page' column exists
+                try:
+                    cursor.execute("PRAGMA table_info(clauses)")
+                    cols = [row[1] for row in cursor.fetchall()]
+                    if 'page' not in cols:
+                        cursor.execute("ALTER TABLE clauses ADD COLUMN page INTEGER")
+                except Exception as _:
+                    # Ignore migration errors; table creation above includes page for fresh DBs
+                    pass
                 conn.commit()
                 logger.info("SQLite schema created.")
         except Exception as e:
@@ -60,14 +70,15 @@ class SQLiteClient:
             logger.error(f"Error retrieving document ID: {str(e)}")
             return None
 
-    def store_clauses(self, doc_id: int, clauses: list[str], vector_ids: list[str]):
+    def store_clauses(self, doc_id: int, clauses: list[str], vector_ids: list[str], pages: list[int | None] | None = None):
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                for clause, vector_id in zip(clauses, vector_ids):
+                for idx, (clause, vector_id) in enumerate(zip(clauses, vector_ids)):
+                    page_val = pages[idx] if pages is not None and idx < len(pages) else None
                     cursor.execute(
-                        "INSERT INTO clauses (doc_id, clause_text, vector_id) VALUES (?, ?, ?)",
-                        (doc_id, clause, vector_id)
+                        "INSERT INTO clauses (doc_id, clause_text, vector_id, page) VALUES (?, ?, ?, ?)",
+                        (doc_id, clause, vector_id, page_val)
                     )
                 conn.commit()
                 logger.info(f"Stored {len(clauses)} clauses for doc_id {doc_id}")
