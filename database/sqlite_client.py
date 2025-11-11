@@ -100,6 +100,18 @@ class SQLiteClient:
             logger.error(f"Error retrieving document ID: {str(e)}")
             return None
 
+    def get_document_filename(self, doc_id: int) -> str | None:
+        """Get document filename by doc_id"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT filename FROM documents WHERE id = ?", (doc_id,))
+                result = cursor.fetchone()
+                return result[0] if result else None
+        except Exception as e:
+            logger.error(f"Error retrieving document filename: {str(e)}")
+            return None
+
     def store_clauses(self, doc_id: int, clauses: list[str], vector_ids: list[str], pages: list[int | None] | None = None):
         """Optimized batch insert using executemany for better performance"""
         try:

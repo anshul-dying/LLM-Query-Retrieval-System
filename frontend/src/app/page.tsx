@@ -162,27 +162,41 @@ export default function HackathonUI() {
       }
       
       const data = await response.json();
+      console.log('Full API response:', data); // Debug log
       const rawAnswer = data.answers?.[0] || 'No response received';
+      console.log('Raw answer:', rawAnswer, 'Type:', typeof rawAnswer); // Debug log
       
       let answer: string;
       let references: any[] = [];
       
       if (typeof rawAnswer === 'string') {
         answer = rawAnswer;
-      } else if (rawAnswer && typeof rawAnswer === 'object' && rawAnswer.answer) {
-        answer = rawAnswer.answer;
+        // Try to extract references from data if answer is a string
+        if (data.references && Array.isArray(data.references)) {
+          references = data.references;
+        }
+      } else if (rawAnswer && typeof rawAnswer === 'object') {
+        answer = rawAnswer.answer || rawAnswer.toString() || 'No response received';
         references = rawAnswer.references || [];
+        console.log('Extracted references from object:', references); // Debug log
       } else {
         answer = 'No response received';
       }
+      
+      // Log for debugging
+      console.log('Final answer:', answer);
+      console.log('Final references:', references);
       
       const aiMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
         content: answer,
-        references: references.length > 0 ? references : [],
+        references: Array.isArray(references) ? references : [],
         timestamp: new Date()
       };
+      
+      // Debug: Log the message being added
+      console.log('Adding message with references:', aiMessage.references?.length || 0);
       
       setMessages(prev => [...prev, aiMessage]);
     } catch (err: any) {
@@ -451,7 +465,10 @@ export default function HackathonUI() {
         </div>
 
           {/* Chat Interface */}
-        <Card className="overflow-hidden flex flex-col" style={{ height: '600px', display: 'flex' }}>
+        <Card
+          className="overflow-hidden flex flex-col h-[75vh] sm:h-[80vh] lg:h-[85vh]"
+          style={{ display: 'flex' }}
+        >
           <div className="border-b border-white/10 p-4 sm:p-6 flex-shrink-0">
             <div className="flex items-center gap-3 flex-wrap">
               <MessageSquare className="w-6 h-6 text-purple-400 flex-shrink-0" aria-hidden="true" />
@@ -467,6 +484,14 @@ export default function HackathonUI() {
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scroll-smooth bg-gradient-to-b from-transparent to-black/10" style={{ minHeight: 0 }} role="log" aria-live="polite" aria-label="Chat messages">
             {messages.map((message) => {
               const Icon = message.role === 'user' ? User : Bot;
+              // Debug: Log message references
+              if (message.role === 'assistant') {
+                console.log('Rendering message with references:', {
+                  hasReferences: !!message.references,
+                  referencesLength: message.references?.length || 0,
+                  references: message.references
+                });
+              }
               return (
                 <div key={message.id} className={`flex gap-4 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}>
                   <div
@@ -492,49 +517,70 @@ export default function HackathonUI() {
                       </div>
                     </div>
 
-                    {message.references && message.references.length > 0 && (
-                      <div className="mt-3 space-y-2">
-                        <p className="text-xs text-gray-400 mb-2 font-medium flex items-center gap-1">
-                          <FileText className="w-3 h-3" />
-                          References ({message.references.length}):
-                        </p>
-                        <div className="grid grid-cols-1 gap-2">
+                    {message.references && Array.isArray(message.references) && message.references.length > 0 ? (
+                      <div className="mt-4 space-y-3">
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="w-5 h-5 bg-blue-500/20 rounded flex items-center justify-center">
+                            <FileText className="w-3.5 h-3.5 text-blue-400" />
+                          </div>
+                          <p className="text-sm font-semibold text-blue-300 flex items-center gap-2">
+                            Sources ({message.references.length})
+                            <span className="text-xs text-gray-400 font-normal">- Information retrieved from:</span>
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-1 gap-3">
                           {message.references.map((ref, idx) => (
                             <div
                               key={idx}
-                              className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 text-sm bg-white/5 backdrop-blur-xl border border-white/10 rounded-lg p-3 hover:bg-white/10 hover:border-blue-500/30 transition-all"
+                              className="flex flex-col gap-3 text-sm bg-gradient-to-r from-blue-500/10 to-purple-500/10 backdrop-blur-xl border border-blue-500/30 rounded-xl p-4 hover:bg-gradient-to-r hover:from-blue-500/20 hover:to-purple-500/20 hover:border-blue-400/50 transition-all shadow-lg"
                             >
-                              <div className="flex items-center gap-2 flex-1 min-w-0">
-                                <FileText className="w-4 h-4 text-blue-400 flex-shrink-0" aria-hidden="true" />
-                                <span className="text-gray-300 truncate font-medium" title={ref.doc_name || 'Document'}>
-                                  {ref.doc_name || 'Document'}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2 text-xs flex-wrap flex-shrink-0">
-                                {ref.page && (
-                                  <span className="px-2 py-1 bg-blue-500/20 text-blue-300 rounded font-medium">Page {ref.page}</span>
+                              <div className="flex items-start gap-3">
+                                <div className="w-8 h-8 bg-blue-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                                  <FileText className="w-4 h-4 text-blue-400" aria-hidden="true" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                    <span className="text-white font-semibold truncate" title={ref.doc_name || 'Document'}>
+                                      {ref.doc_name || 'Document'}
+                                    </span>
+                                    {ref.page && (
+                                      <span className="px-2.5 py-1 bg-blue-500/30 text-blue-200 rounded-md font-medium text-xs whitespace-nowrap">
+                                        Page {ref.page}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {ref.clause && (
+                                    <div className="mt-2 p-2.5 bg-black/20 rounded-lg border border-white/10">
+                                      <p className="text-xs text-gray-300 leading-relaxed line-clamp-3" title={ref.clause}>
+                                        {ref.clause}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                                {ref.doc_url && (
+                                  <a
+                                    href={ref.doc_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-400 hover:text-blue-300 transition-colors flex-shrink-0 p-2 hover:bg-blue-500/20 rounded-lg border border-blue-500/30 hover:border-blue-400/50"
+                                    aria-label={`Open ${ref.doc_name || 'document'} in new tab`}
+                                    title="Open document"
+                                  >
+                                    <ExternalLink className="w-4 h-4" aria-hidden="true" />
+                                  </a>
                                 )}
-                                {ref.clause && (
-                                  <span className="text-gray-400 truncate max-w-[200px] sm:max-w-[250px]" title={ref.clause}>
-                                    {ref.clause}
-                                  </span>
-                                )}
                               </div>
-                              {ref.doc_url && (
-                                <a
-                                  href={ref.doc_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-400 hover:text-blue-300 transition-colors flex-shrink-0 p-1 hover:bg-blue-500/20 rounded"
-                                  aria-label={`Open ${ref.doc_name || 'document'} in new tab`}
-                                >
-                                  <ExternalLink className="w-4 h-4" aria-hidden="true" />
-                                </a>
-                              )}
                             </div>
                           ))}
                         </div>
                       </div>
+                    ) : (
+                      // Show a message if no references are available (for debugging)
+                      message.role === 'assistant' && (
+                        <div className="mt-3 text-xs text-gray-500 italic">
+                          No source references available for this response
+                        </div>
+                      )
                     )}
 
                     <div className={`mt-2 text-xs text-gray-500 ${message.role === 'user' ? 'text-right' : ''}`}>

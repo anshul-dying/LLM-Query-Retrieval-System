@@ -1,10 +1,12 @@
 from core.clause_matcher import ClauseMatcher
 from core.llm_client import LLMClient
 from core.predefined_answers import PredefinedAnswers
+from database.sqlite_client import SQLiteClient
 from loguru import logger
 import requests
 import json
 import re
+import os
 
 class DecisionEngine:
     def __init__(self):
@@ -33,9 +35,9 @@ class DecisionEngine:
             
             # Process normal questions
             normal_answer = self._process_normal_query(question, doc_id, doc_name)
-            # Handle both string and dict responses
+            # Handle both string and dict responses - preserve full dict to keep references
             if isinstance(normal_answer, dict):
-                answers.append(normal_answer.get("answer", str(normal_answer)))
+                answers.append(normal_answer)  # Keep the full dict with answer and references
             else:
                 answers.append(normal_answer)
         
@@ -177,13 +179,28 @@ class DecisionEngine:
         predefined_answer = self.predefined_answers.find_matching_answer(query)
         if predefined_answer:
             logger.info(f"Using predefined answer for query: {query[:50]}...")
-            return predefined_answer
+            # Even for predefined answers, try to find relevant clauses for references
+            matched_clauses = self._retrieve_relevant_clauses(query, doc_id)
+            # If no matched clauses, try to get any clause from the document
+            if not matched_clauses and doc_id:
+                try_any = self.clause_matcher.embedding_generator.search_any_clause(query, top_k=3, doc_id=doc_id)
+                if try_any:
+                    matched_clauses = try_any
+                    logger.info(f"Found {len(matched_clauses)} fallback clauses for predefined answer references")
+            refs = self._build_references(matched_clauses, doc_id, doc_name) if matched_clauses else []
+            # Return as dict to include references
+            return {"answer": predefined_answer, "references": refs}
         
         # Enhanced clause matching with multiple retrieval strategies
         matched_clauses = self._retrieve_relevant_clauses(query, doc_id)
         
         if not matched_clauses:
             logger.warning(f"No similar clauses found for query: {query}")
+            # Try to get any clause from the document as a fallback reference
+            try_any = self.clause_matcher.embedding_generator.search_any_clause(query, top_k=3, doc_id=doc_id)
+            if try_any:
+                logger.info(f"Found {len(try_any)} fallback clauses for references")
+                matched_clauses = try_any
             return self._fallback_response(query, doc_id, doc_name)
         
         # Build comprehensive context with smart selection
@@ -480,16 +497,61 @@ class DecisionEngine:
         
         return instructions.get(query_type, instructions["general"])
 
+    def _get_display_name(self, doc_id: int, doc_name: str | None) -> str:
+        """Get a user-friendly display name for the document"""
+        if not doc_id:
+            # Try to extract filename from doc_name if it's a path/URL
+            if doc_name:
+                # Extract filename from path/URL
+                name = doc_name.split("/")[-1].split("\\")[-1]
+                if name and name != doc_name:
+                    return name
+                return doc_name
+            return "Document"
+        
+        # Try to get filename from database
+        try:
+            sqlite = SQLiteClient()
+            filename = sqlite.get_document_filename(doc_id)
+            if filename:
+                return filename
+        except Exception as e:
+            logger.warning(f"Could not get filename from database: {e}")
+        
+        # Fallback to extracting from doc_name
+        if doc_name:
+            name = doc_name.split("/")[-1].split("\\")[-1]
+            if name and name != doc_name:
+                return name
+            return doc_name
+        
+        return "Document"
+
     def _build_references(self, matched_clauses: list[dict], doc_id: int, doc_name: str | None) -> list[dict]:
-        """Build reference list from matched clauses"""
+        """Build reference list from matched clauses - always include top matches"""
         refs = []
         seen_pages = set()
         seen_text = set()
         
-        for clause in matched_clauses[:15]:  # Top 15 references
+        if not matched_clauses:
+            logger.warning("No matched clauses provided for building references")
+            return refs
+        
+        # Get a proper display name
+        display_name = self._get_display_name(doc_id, doc_name)
+        doc_url = doc_name or ""
+        
+        # Always include at least the top 3-5 matched clauses to show where answer came from
+        # This ensures users can see the source even if scores are low
+        max_refs_to_check = min(15, len(matched_clauses))
+        
+        for i, clause in enumerate(matched_clauses[:max_refs_to_check]):
             page = clause.get("page")
             clause_text = clause.get("clause", "")
             score = clause.get("score", 0)
+            
+            if not clause_text:  # Skip empty clauses
+                continue
             
             # Deduplicate
             clause_key = clause_text[:150].lower()
@@ -497,20 +559,24 @@ class DecisionEngine:
                 continue
             seen_text.add(clause_key)
             
-            # Add if it's a unique page or has high relevance
+            # More lenient conditions: always include top 5, or if it meets quality criteria
             should_add = False
-            if page and page not in seen_pages:
+            if i < 5:  # Always include top 5 matches
                 should_add = True
-            elif score > 0.3:  # High relevance
+            elif page and page not in seen_pages:
+                should_add = True
+            elif score > 0.2:  # Lowered threshold from 0.3 to 0.2
                 should_add = True
             elif clause.get("keyword_matches"):
+                should_add = True
+            elif score > 0:  # Include any match with positive score
                 should_add = True
             
             if should_add:
                 refs.append({
                     "doc_id": doc_id or 0,
-                    "doc_name": doc_name or "Document",
-                    "doc_url": doc_name or "",
+                    "doc_name": display_name,
+                    "doc_url": doc_url,
                     "page": page,
                     "clause": clause_text[:400] + "..." if len(clause_text) > 400 else clause_text,
                     "score": round(score, 3),
@@ -521,6 +587,22 @@ class DecisionEngine:
             if len(refs) >= 10:  # Max 10 references
                 break
         
+        # If we still have no references but have matched clauses, include at least the top one
+        if len(refs) == 0 and matched_clauses:
+            logger.info("No references met criteria, adding top match as reference")
+            top_clause = matched_clauses[0]
+            clause_text = top_clause.get("clause", "")
+            if clause_text:  # Only add if clause text exists
+                refs.append({
+                    "doc_id": doc_id or 0,
+                    "doc_name": display_name,
+                    "doc_url": doc_url,
+                    "page": top_clause.get("page"),
+                    "clause": (clause_text[:400] + "...") if len(clause_text) > 400 else clause_text,
+                    "score": round(top_clause.get("score", 0), 3),
+                })
+        
+        logger.info(f"Built {len(refs)} references from {len(matched_clauses)} matched clauses for doc_id={doc_id}, doc_name={display_name}")
         return refs
 
     def _fallback_response(self, query: str, doc_id: int, doc_name: str | None) -> dict:
