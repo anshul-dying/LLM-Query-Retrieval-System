@@ -56,20 +56,32 @@ class EmbeddingGenerator:
             logger.error(f"Error saving vector id order: {str(e)}")
 
     def generate_embeddings(self, clauses: list[str], doc_id: int, pages: list[int | None] | None = None) -> list[str]:
+        """Optimized batch embedding generation with batch FAISS index operations"""
         try:
-            embeddings = self.model.encode(clauses, show_progress_bar=False, batch_size=16)
+            if not clauses:
+                return []
+            
+            # Optimize batch size for encoding based on available memory
+            # Use larger batch size for better GPU utilization if available
+            batch_size = 32  # Increased from 16 for better throughput
+            embeddings = self.model.encode(clauses, show_progress_bar=False, batch_size=batch_size)
             vector_ids = []
             
             # Load existing metadata to preserve other documents
             existing_metadata = self._load_metadata()
             
-            for i, (clause, embedding) in enumerate(zip(clauses, embeddings)):
+            # Prepare batch data for metadata
+            for i, clause in enumerate(clauses):
                 vector_id = f"{doc_id}_{i}"
-                self.index.add(np.array([embedding]).astype('float32'))
                 page = pages[i] if pages is not None and i < len(pages) else None
                 existing_metadata[vector_id] = {"clause": clause, "doc_id": doc_id, "page": page}
                 vector_ids.append(vector_id)
                 self.vector_id_order.append(vector_id)
+            
+            # Batch add all embeddings to FAISS index at once - much faster than individual adds
+            if len(embeddings) > 0:
+                embeddings_array = np.array(embeddings).astype('float32')
+                self.index.add(embeddings_array)
             
             # Update the metadata with all documents
             self.clause_metadata = existing_metadata
@@ -77,7 +89,7 @@ class EmbeddingGenerator:
             faiss.write_index(self.index, self.index_path)
             self._save_metadata()
             self._save_order()
-            logger.info(f"Stored {len(vector_ids)} embeddings for doc_id {doc_id}, total vectors: {self.vector_count}")
+            logger.info(f"Stored {len(vector_ids)} embeddings for doc_id {doc_id}, total vectors: {self.vector_count} (batch insert)")
             return vector_ids
         except Exception as e:
             logger.error(f"Error generating embeddings: {str(e)}")
@@ -89,7 +101,9 @@ class EmbeddingGenerator:
     def search_similar_clauses(self, query: str, top_k: int = 30, doc_id: int = None) -> list[dict]:
         try:
             query_embedding = self.model.encode([query])[0].astype('float32')
-            distances, indices = self.index.search(np.array([query_embedding]), top_k)
+            # Search more broadly
+            search_k = min(top_k * 2, max(100, self.vector_count))  # Search more candidates
+            distances, indices = self.index.search(np.array([query_embedding]), search_k)
             results = []
             # Use deterministic order aligned with FAISS index
             metadata_keys = self.vector_id_order
@@ -113,22 +127,61 @@ class EmbeddingGenerator:
                         continue
                     
                     score = 1 / (1 + distance)
-                    # Lower threshold to be more lenient
-                    if score > 0.05:  # Much lower threshold
+                    # Very lenient threshold to catch all potentially relevant content
+                    # We'll re-rank later based on query-specific boosts
+                    if score > 0.01:  # Very low threshold - accept almost all results for re-ranking
                         results.append({
                             "clause": clause_data["clause"],
                             "score": float(score),
-                            "page": clause_data.get("page")
+                            "page": clause_data.get("page"),
+                            "doc_id": clause_data.get("doc_id")
                         })
-                        logger.info(f"Found clause with score {score:.3f}: {clause_data['clause'][:100]}...")
+                        logger.debug(f"Found clause with score {score:.3f}: {clause_data['clause'][:100]}...")
             
-            logger.info(f"Found {len(results)} similar clauses for query")
-            return results
+            # Sort by score and return top_k, but keep more for potential re-ranking
+            results = sorted(results, key=lambda x: x["score"], reverse=True)
+            logger.info(f"Found {len(results)} similar clauses for query (returning top {min(top_k, len(results))})")
+            return results[:top_k] if len(results) > top_k else results
         except Exception as e:
             logger.error(f"Error searching similar clauses: {str(e)}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return []
+
+    def search_by_keywords(self, keywords: list[str], doc_id: int = None, top_k: int = 20) -> list[dict]:
+        """Search for clauses containing specific keywords"""
+        results = []
+        keywords_lower = [k.lower() for k in keywords]
+        
+        for vector_id, clause_data in self.clause_metadata.items():
+            if doc_id is not None and clause_data.get("doc_id") != doc_id:
+                continue
+            
+            clause_text = clause_data.get("clause", "").lower()
+            
+            # Count keyword matches
+            match_count = sum(1 for keyword in keywords_lower if keyword in clause_text)
+            
+            if match_count > 0:
+                # Score based on number of keyword matches and position
+                score = match_count * 0.5
+                # Boost if keywords appear near the beginning
+                for keyword in keywords_lower:
+                    pos = clause_text.find(keyword)
+                    if pos >= 0 and pos < 100:
+                        score += 0.3
+                
+                results.append({
+                    "clause": clause_data["clause"],
+                    "score": float(score),
+                    "page": clause_data.get("page"),
+                    "keyword_matches": True
+                })
+        
+        # Sort by score and return top results
+        results.sort(key=lambda x: x.get("score", 0), reverse=True)
+        logger.info(f"Keyword search found {len(results)} clauses matching keywords: {keywords}")
+        return results[:top_k]
 
     def search_any_clause(self, query: str, top_k: int = 1, doc_id: int | None = None) -> list[dict]:
         """Return the best clauses regardless of score threshold, optionally filter by doc_id."""

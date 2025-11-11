@@ -4,6 +4,7 @@ from core.decision_engine import DecisionEngine
 from core.document_processor import DocumentProcessor
 from core.embedding_generator import EmbeddingGenerator
 from core.logger_manager import LoggerManager
+from core.chunking_utils import chunk_clauses_optimized
 from database.sqlite_client import SQLiteClient
 from loguru import logger
 
@@ -26,25 +27,8 @@ async def process_queries(request: QueryRequest):
             clauses = [c["text"] for c in clauses_with_pages]
             pages = [c.get("page") for c in clauses_with_pages]
             max_clause_size = 40000
-            chunked_clauses = []
-            chunked_pages = []
-            for clause_text, clause_page in zip(clauses, pages):
-                if len(clause_text.encode('utf-8')) > max_clause_size:
-                    words = clause_text.split()
-                    current_chunk = ""
-                    for word in words:
-                        if len((current_chunk + " " + word).encode('utf-8')) > max_clause_size:
-                            chunked_clauses.append(current_chunk.strip())
-                            chunked_pages.append(clause_page)
-                            current_chunk = word
-                        else:
-                            current_chunk += " " + word
-                    if current_chunk:
-                        chunked_clauses.append(current_chunk.strip())
-                        chunked_pages.append(clause_page)
-                else:
-                    chunked_clauses.append(clause_text)
-                    chunked_pages.append(clause_page)
+            # Use optimized chunking function
+            chunked_clauses, chunked_pages = chunk_clauses_optimized(clauses, pages, max_clause_size)
             filename = request.documents.split("/")[-1]
             doc_id = sqlite.store_document(request.documents, filename)
             

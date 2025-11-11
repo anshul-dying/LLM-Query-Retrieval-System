@@ -4,28 +4,18 @@
   /* Base */
   --background: #ffffff;
   --foreground: #111827;
-  /* gray-900 */
 
   /* Semantic */
   --surface: #ffffff;
   --border: #e5e7eb;
-  /* gray-200 */
   --muted: #6b7280;
-  /* gray-600 */
   --link: #2563eb;
-  /* blue-600 */
   --primary: #111827;
-  /* gray-900 */
   --primary-hover: #1f2937;
-  /* gray-800 */
   --disabled: #d1d5db;
-  /* gray-300 */
   --accent: #f3f4f6;
-  /* gray-100 */
   --danger: #dc2626;
-  /* red-600 */
   --danger-bg: #fef2f2;
-  /* red-50 */
 }
 
 @theme inline {
@@ -49,33 +39,86 @@
   :root {
     --background: #0a0a0a;
     --foreground: #e5e7eb;
-    /* gray-200 */
-
     --surface: #111827;
-    /* gray-900 panel */
     --border: #1f2937;
-    /* gray-800 */
     --muted: #a3a3a3;
-    /* zinc-400 */
     --link: #60a5fa;
-    /* blue-400 */
     --primary: #e5e7eb;
-    /* text on dark */
     --primary-hover: #f3f4f6;
-    /* slightly lighter */
     --disabled: #374151;
-    /* gray-700 */
     --accent: #1f2937;
-    /* gray-800 */
     --danger: #f87171;
-    /* red-400 */
     --danger-bg: #2b0e0e;
-    /* dark red tint */
   }
+}
+
+/* Smooth scrolling and better typography */
+* {
+  scroll-behavior: smooth;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  line-height: 1.6;
+}
+
+/* Improved accessibility - focus indicators */
+*:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.5);
+  outline-offset: 2px;
+}
+
+/* Custom scrollbar for better UX */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Smooth animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Reduced motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

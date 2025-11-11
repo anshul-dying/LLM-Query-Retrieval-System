@@ -126,7 +126,7 @@ class DocumentProcessor:
             if file_extension == ".pdf":
                 temp_file = self._download_file(doc_url, ".pdf")
                 try:
-                    # First attempt: PyPDF2 text extraction per page
+                    # First attempt: PyPDF2 text extraction per page with table detection
                     try:
                         with open(temp_file, "rb") as f:
                             reader = PyPDF2.PdfReader(f)
@@ -134,19 +134,41 @@ class DocumentProcessor:
                                 page_text = (page.extract_text() or "").strip()
                                 if not page_text:
                                     continue
+                                
+                                # Detect and preserve table structures (lines with multiple tabs or spaces as separators)
+                                lines = page_text.split('\n')
+                                processed_lines = []
+                                for line in lines:
+                                    line = line.strip()
+                                    if not line:
+                                        continue
+                                    
+                                    # Detect table patterns (multiple columns separated by spaces/tabs)
+                                    if '\t' in line or (len(line.split()) > 3 and '|' in line):
+                                        # Preserve table structure
+                                        processed_lines.append(f"[TABLE ROW] {line}")
+                                    else:
+                                        processed_lines.append(line)
+                                
+                                page_text = '\n'.join(processed_lines)
+                                
                                 paragraphs = page_text.split('\n\n')
                                 for para in paragraphs:
-                                    sentences = para.strip().split('. ')
-                                    for s in sentences:
-                                        s_clean = s.strip()
-                                        if s_clean:
-                                            if not s_clean.endswith(('.', '!', '?')):
-                                                s_clean += '.'
-                                            results.append({"text": s_clean, "page": idx})
+                                    # If paragraph contains table marker, keep it as-is
+                                    if "[TABLE ROW]" in para:
+                                        results.append({"text": para.replace("[TABLE ROW] ", ""), "page": idx})
+                                    else:
+                                        sentences = para.strip().split('. ')
+                                        for s in sentences:
+                                            s_clean = s.strip()
+                                            if s_clean:
+                                                if not s_clean.endswith(('.', '!', '?')):
+                                                    s_clean += '.'
+                                                results.append({"text": s_clean, "page": idx})
                     except Exception as e:
                         logger.warning(f"PyPDF2 per-page extraction failed: {e}")
 
-                    # Fallback 1: PyMuPDF (fitz) per-page text extraction
+                    # Fallback 1: Try PyMuPDF with better table extraction
                     if len(results) == 0:
                         try:
                             import fitz  # type: ignore
@@ -154,18 +176,59 @@ class DocumentProcessor:
                             try:
                                 for idx in range(len(doc)):
                                     page = doc.load_page(idx)
-                                    page_text = (page.get_text("text") or "").strip()
-                                    if not page_text:
-                                        continue
-                                    paragraphs = page_text.split('\n\n')
-                                    for para in paragraphs:
-                                        sentences = para.strip().split('. ')
-                                        for s in sentences:
-                                            s_clean = s.strip()
-                                            if s_clean:
-                                                if not s_clean.endswith(('.', '!', '?')):
-                                                    s_clean += '.'
-                                                results.append({"text": s_clean, "page": idx + 1})
+                                    # Try structured text extraction first (better for tables)
+                                    try:
+                                        # Get text blocks with positions
+                                        blocks = page.get_text("dict")
+                                        page_text_parts = []
+                                        
+                                        for block in blocks.get("blocks", []):
+                                            if "lines" in block:
+                                                line_texts = []
+                                                for line in block["lines"]:
+                                                    word_texts = [span.get("text", "").strip() for span in line.get("spans", [])]
+                                                    line_text = " ".join([w for w in word_texts if w])
+                                                    if line_text:
+                                                        line_texts.append(line_text)
+                                                
+                                                if line_texts:
+                                                    # Detect table pattern (multiple words in line, similar widths)
+                                                    if len(line_texts) > 0:
+                                                        # Check if this looks like a table row
+                                                        words_per_line = [len(line.split()) for line in line_texts]
+                                                        if any(w > 3 for w in words_per_line) or len(line_texts) > 2:
+                                                            page_text_parts.append(f"[TABLE] {' | '.join(line_texts)}")
+                                                        else:
+                                                            page_text_parts.append("\n".join(line_texts))
+                                        
+                                        page_text = "\n".join(page_text_parts).strip()
+                                        if page_text:
+                                            paragraphs = page_text.split('\n\n')
+                                            for para in paragraphs:
+                                                if "[TABLE]" in para:
+                                                    # Keep table rows as-is
+                                                    results.append({"text": para.replace("[TABLE] ", ""), "page": idx + 1})
+                                                else:
+                                                    sentences = para.strip().split('. ')
+                                                    for s in sentences:
+                                                        s_clean = s.strip()
+                                                        if s_clean:
+                                                            if not s_clean.endswith(('.', '!', '?')):
+                                                                s_clean += '.'
+                                                            results.append({"text": s_clean, "page": idx + 1})
+                                    except:
+                                        # Fallback to simple text extraction
+                                        page_text = (page.get_text("text") or "").strip()
+                                        if page_text:
+                                            paragraphs = page_text.split('\n\n')
+                                            for para in paragraphs:
+                                                sentences = para.strip().split('. ')
+                                                for s in sentences:
+                                                    s_clean = s.strip()
+                                                    if s_clean:
+                                                        if not s_clean.endswith(('.', '!', '?')):
+                                                            s_clean += '.'
+                                                        results.append({"text": s_clean, "page": idx + 1})
                             finally:
                                 try:
                                     doc.close()
@@ -174,43 +237,137 @@ class DocumentProcessor:
                         except Exception as e:
                             logger.warning(f"PyMuPDF extraction not available/failed: {e}")
 
-                    # Fallback 2: OCR each page image if still empty
-                    if len(results) == 0:
+                    # Fallback 2: OCR each page image - always try OCR for image-based PDFs
+                    # Check if PDF is image-based (scanned PDF) or has images
+                    should_use_ocr = len(results) < 3  # Low text content suggests image-based
+                    total_text_length = sum(len(r.get("text", "")) for r in results)
+                    
+                    try:
+                        import fitz  # type: ignore
+                        doc = fitz.open(temp_file)
                         try:
-                            import fitz  # type: ignore
-                            doc = fitz.open(temp_file)
-                            try:
+                            # First pass: Check if pages have embedded images or are image-based
+                            has_images = False
+                            total_pages = len(doc)
+                            
+                            # Check each page for images
+                            for idx in range(total_pages):
+                                page = doc.load_page(idx)
+                                image_list = page.get_images()
+                                if image_list and len(image_list) > 0:
+                                    has_images = True
+                                    logger.info(f"Page {idx + 1} contains {len(image_list)} embedded image(s)")
+                            
+                            # Also check if pages appear to be image-based (scanned PDFs)
+                            # Scanned PDFs often have no extractable text but have rendered images
+                            is_image_based = False
+                            if total_text_length < 50 and total_pages > 0:  # Very little text suggests scanned PDF
+                                # Check if pages have renderable content but no text
+                                for idx in range(min(3, total_pages)):  # Check first 3 pages
+                                    page = doc.load_page(idx)
+                                    page_text = page.get_text("text").strip()
+                                    if len(page_text) < 10:  # Very little text on page
+                                        # Check if page has renderable content (likely an image)
+                                        pix = page.get_pixmap()
+                                        if pix.width > 100 and pix.height > 100:  # Has dimensions (is renderable)
+                                            is_image_based = True
+                                            logger.info(f"Page {idx + 1} appears to be image-based (scanned PDF)")
+                                            break
+                                        pix = None
+                            
+                            # If PDF has images OR has very little text OR appears to be scanned, use OCR
+                            if has_images or should_use_ocr or total_text_length < 100 or is_image_based:
+                                logger.info(f"Detected image-based PDF or low text content. Using OCR for {len(doc)} pages")
+                                
+                                # Clear previous minimal results if OCR is needed
+                                if has_images and len(results) < 10:
+                                    results = []  # Start fresh with OCR
+                                
                                 for idx in range(len(doc)):
                                     page = doc.load_page(idx)
-                                    pix = page.get_pixmap(dpi=200)
+                                    image_list = page.get_images()
+                                    
+                                    if image_list and len(image_list) > 0:
+                                        logger.info(f"Page {idx + 1} contains {len(image_list)} image(s) - performing OCR")
+                                    
+                                    # Convert page to image for OCR (higher DPI for better accuracy)
+                                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom = 288 DPI
                                     img_bytes = pix.tobytes("png")
                                     image = Image.open(io.BytesIO(img_bytes))
+                                    
                                     try:
-                                        ocr_text = pytesseract.image_to_string(image)
+                                        # Use better OCR configuration for full pages
+                                        # PSM 6 = Assume uniform block of text
+                                        # PSM 11 = Sparse text (better for scanned documents)
+                                        # PSM 3 = Fully automatic (best for varied content)
+                                        ocr_configs = [
+                                            '--psm 3 --oem 3 -c preserve_interword_spaces=1',  # Automatic page segmentation
+                                            '--psm 6 --oem 3 -c preserve_interword_spaces=1',  # Uniform block
+                                            '--psm 11 --oem 3',  # Sparse text
+                                        ]
+                                        
+                                        ocr_text = ""
+                                        for ocr_config in ocr_configs:
+                                            try:
+                                                ocr_text = pytesseract.image_to_string(image, config=ocr_config).strip()
+                                                if ocr_text and len(ocr_text) > 20:
+                                                    break  # Use first successful OCR
+                                            except Exception as ocr_err:
+                                                logger.debug(f"OCR config {ocr_config} failed: {ocr_err}")
+                                                continue
+                                        
                                     finally:
                                         try:
                                             image.close()
+                                            pix = None  # Free memory
                                         except Exception:
                                             pass
+                                    
                                     ocr_text = (ocr_text or "").strip()
-                                    if not ocr_text:
-                                        continue
-                                    paragraphs = ocr_text.split('\n\n')
-                                    for para in paragraphs:
-                                        sentences = para.strip().split('. ')
-                                        for s in sentences:
-                                            s_clean = s.strip()
-                                            if s_clean:
-                                                if not s_clean.endswith(('.', '!', '?')):
-                                                    s_clean += '.'
-                                                results.append({"text": s_clean, "page": idx + 1})
-                            finally:
-                                try:
-                                    doc.close()
-                                except Exception:
-                                    pass
-                        except Exception as e:
-                            logger.warning(f"OCR fallback failed: {e}")
+                                    if ocr_text and len(ocr_text) > 10:  # Use OCR if any meaningful text found
+                                        logger.info(f"OCR extracted {len(ocr_text)} characters from page {idx + 1}")
+                                        
+                                        # Process OCR text into clauses
+                                        # First, try to split by paragraphs
+                                        paragraphs = ocr_text.split('\n\n')
+                                        for para in paragraphs:
+                                            para = para.strip()
+                                            if not para:
+                                                continue
+                                            
+                                            # If paragraph looks like a table (multiple lines with similar patterns)
+                                            lines = para.split('\n')
+                                            if len(lines) > 2:
+                                                # Check if lines have similar structure (might be table)
+                                                line_lengths = [len(line) for line in lines]
+                                                if len(set(line_lengths)) <= 3:  # Similar lengths suggest table
+                                                    # Keep as table-like structure
+                                                    results.append({"text": para, "page": idx + 1})
+                                                    continue
+                                            
+                                            # Split into sentences
+                                            sentences = para.replace('. ', '.\n').split('\n')
+                                            for s in sentences:
+                                                s_clean = s.strip()
+                                                if s_clean and len(s_clean) > 5:  # Lower threshold for OCR
+                                                    if not s_clean.endswith(('.', '!', '?', ':', ';')):
+                                                        s_clean += '.'
+                                                    results.append({"text": s_clean, "page": idx + 1})
+                                    
+                                    if not ocr_text or len(ocr_text) < 10:
+                                        logger.warning(f"OCR found little to no text on page {idx + 1}")
+                                        
+                            if has_images:
+                                logger.info(f"OCR processing completed. Extracted {len(results)} clauses from images")
+                        finally:
+                            try:
+                                doc.close()
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        logger.warning(f"OCR fallback failed: {e}")
+                        import traceback
+                        logger.debug(traceback.format_exc())
                 finally:
                     self._safe_remove_file(temp_file)
                 logger.info(f"Extracted {len(results)} clauses with pages from PDF")

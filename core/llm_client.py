@@ -23,11 +23,26 @@ class LLMClient:
         self.local_model = LOCAL_LLM_MODEL
         
         # Multiple models for fallback (cloud-based)
+        # Try models without :free suffix first, then with it if needed
+        # Note: Model availability may vary. Check OpenRouter dashboard for current models
         self.models = [
-            "moonshotai/kimi-k2:free",
-            "anthropic/claude-3-haiku:free", 
-            "google/gemma-3n-e2b-it:free",
-            "meta-llama/llama-3.1-8b-instruct:free"
+            # Try common free models without :free suffix first
+            "google/gemini-flash-1.5",
+            "meta-llama/llama-3.2-3b-instruct",
+            "microsoft/phi-3-mini-128k-instruct",
+            "qwen/qwen-2.5-7b-instruct",
+            # Try with :free suffix
+            "google/gemini-flash-1.5:free",
+            "meta-llama/llama-3.2-3b-instruct:free",
+            "microsoft/phi-3-mini-128k-instruct:free",
+            # Alternative free models
+            "mistralai/mistral-7b-instruct",
+            "mistralai/mistral-7b-instruct:free",
+            "google/gemini-pro",
+            "google/gemini-pro:free",
+            # Fallback to paid models if free ones fail (user can use if they have credits)
+            "openai/gpt-3.5-turbo",
+            "anthropic/claude-3-haiku"
         ]
         self.current_model_index = 0
 
@@ -133,7 +148,7 @@ class LLMClient:
     def _try_model(self, payload: dict, headers: dict) -> tuple[bool, str]:
         """Try a specific model and return success status and response"""
         try:
-            response = requests.post(self.api_url, json=payload, headers=headers)
+            response = requests.post(self.api_url, json=payload, headers=headers, timeout=30)
             self.last_request_time = time.time()
             
             if response.status_code == 200:
@@ -143,10 +158,45 @@ class LLMClient:
             elif response.status_code == 429:
                 logger.warning(f"Rate limited on model: {payload['model']}")
                 return False, "rate_limited"
+            elif response.status_code == 401:
+                # Authentication error - API key issue
+                error_detail = "Authentication failed. Check your OpenRouter API key."
+                try:
+                    error_data = response.json()
+                    if "error" in error_data:
+                        error_detail = error_data["error"].get("message", error_detail)
+                except:
+                    pass
+                logger.error(f"Authentication error with model {payload['model']}: {error_detail}")
+                return False, "auth_error"
+            elif response.status_code == 404:
+                # Model not found - try to get more details
+                error_msg = "Model not found"
+                try:
+                    error_data = response.json()
+                    if "error" in error_data:
+                        error_msg = error_data["error"].get("message", error_msg)
+                        logger.warning(f"Model not found: {payload['model']}. Error: {error_msg}")
+                    else:
+                        logger.warning(f"Model not found: {payload['model']}. This model may not be available or the name is incorrect.")
+                except:
+                    logger.warning(f"Model not found: {payload['model']}. This model may not be available or the name is incorrect.")
+                return False, "error_404"
             else:
-                logger.error(f"Error with model {payload['model']}: {response.status_code}")
+                # Try to get error details from response
+                error_detail = f"HTTP {response.status_code}"
+                try:
+                    error_data = response.json()
+                    if "error" in error_data:
+                        error_detail = error_data["error"].get("message", error_detail)
+                except:
+                    pass
+                logger.error(f"Error with model {payload['model']}: {error_detail}")
                 return False, f"error_{response.status_code}"
                 
+        except requests.exceptions.Timeout:
+            logger.error(f"Timeout with model {payload['model']}")
+            return False, "timeout"
         except Exception as e:
             logger.error(f"Exception with model {payload['model']}: {str(e)}")
             return False, "exception"
@@ -161,13 +211,24 @@ class LLMClient:
         # Try local LLM first if enabled
         if self.use_local_llm:
             logger.info("Trying local LLM")
-            success, result = self._try_local_llm(prompt)
-            if success:
-                self._cache_response(prompt, result)
-                logger.info("Generated response using local LLM")
-                return result
-            else:
-                logger.warning(f"Local LLM failed: {result}, falling back to cloud models")
+            try:
+                success, result = self._try_local_llm(prompt)
+                if success:
+                    self._cache_response(prompt, result)
+                    logger.info("Generated response using local LLM")
+                    return result
+                else:
+                    logger.warning(f"Local LLM failed: {result}, falling back to OpenRouter cloud models")
+            except Exception as e:
+                logger.error(f"Local LLM exception occurred: {str(e)}, falling back to OpenRouter")
+        else:
+            logger.info("Local LLM disabled, using OpenRouter cloud models")
+        
+        # Always try OpenRouter as fallback (or primary if local LLM disabled)
+        # Check if API key is configured
+        if not self.api_key:
+            logger.error("OpenRouter API key not configured. Cannot use cloud models.")
+            return "Error: OpenRouter API key not configured. Please set OPENROUTER_API_KEY environment variable."
         
         # Minimal rate limiting for cloud models
         current_time = time.time()
@@ -186,7 +247,7 @@ class LLMClient:
         # Try multiple cloud models in sequence
         for attempt in range(len(self.models)):
             model = self.models[self.current_model_index]
-            logger.info(f"Trying cloud model: {model}")
+            logger.info(f"Trying OpenRouter cloud model ({attempt + 1}/{len(self.models)}): {model}")
             
             payload = {
                 "model": model,
@@ -206,20 +267,34 @@ class LLMClient:
                 # Cache the response
                 final_answer = self._postprocess_answer(result)
                 self._cache_response(prompt, final_answer)
-                logger.info(f"Generated response using cloud model: {model}")
+                logger.info(f"Successfully generated response using OpenRouter model: {model}")
                 return final_answer
             elif result == "rate_limited":
+                logger.warning(f"Rate limited on {model}, trying next model")
                 # Try next model
                 self.current_model_index = (self.current_model_index + 1) % len(self.models)
+                # Wait a bit longer before trying next model on rate limit
+                time.sleep(2)
                 continue
             else:
+                logger.warning(f"Model {model} failed with: {result}, trying next model")
                 # Try next model on other errors
                 self.current_model_index = (self.current_model_index + 1) % len(self.models)
                 continue
         
-        # If all models fail, return fallback response
-        logger.error("All models failed, returning fallback response")
-        return "Unable to generate response. Please ensure Ollama is running for local LLM or try again later."
+        # If all models fail, return fallback response with more details
+        logger.error("All OpenRouter models failed after attempting all fallback models")
+        logger.error("Please check:")
+        logger.error("1. Your OpenRouter API key is correct and has credits")
+        logger.error("2. The model names are correct (check OpenRouter dashboard)")
+        logger.error("3. Your API key has access to the models you're trying to use")
+        logger.error("4. Network connectivity is working")
+        
+        # Check if API key might be the issue
+        if not self.api_key or self.api_key.strip() == "":
+            return "Error: OpenRouter API key is not configured. Please set the OPENROUTER_API_KEY environment variable."
+        
+        return "Unable to generate response at this time. All OpenRouter models failed. Please check your API key configuration, ensure you have credits, and verify the models are available on OpenRouter."
 
     def generate_batch_responses(self, questions_with_context: list[dict]) -> list[str]:
         """Generate responses for multiple questions in a single API call"""

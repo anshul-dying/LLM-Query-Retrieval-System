@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from core.document_processor import DocumentProcessor
 from core.embedding_generator import EmbeddingGenerator
 from core.logger_manager import LoggerManager
+from core.chunking_utils import chunk_clauses_optimized
 from database.sqlite_client import SQLiteClient
 from loguru import logger
 from fastapi import UploadFile, File
@@ -27,25 +28,8 @@ async def ingest_document(request: DocumentRequest):
         logger.info(f"Extracted {len(clauses)} clauses (with page indices when available)")
         
         max_clause_size = 40000
-        chunked_clauses = []
-        chunked_pages = []
-        for clause_text, clause_page in zip(clauses, pages):
-            if len(clause_text.encode('utf-8')) > max_clause_size:
-                words = clause_text.split()
-                current_chunk = ""
-                for word in words:
-                    if len((current_chunk + " " + word).encode('utf-8')) > max_clause_size:
-                        chunked_clauses.append(current_chunk.strip())
-                        chunked_pages.append(clause_page)
-                        current_chunk = word
-                    else:
-                        current_chunk += " " + word
-                if current_chunk:
-                    chunked_clauses.append(current_chunk.strip())
-                    chunked_pages.append(clause_page)
-            else:
-                chunked_clauses.append(clause_text)
-                chunked_pages.append(clause_page)
+        # Use optimized chunking function
+        chunked_clauses, chunked_pages = chunk_clauses_optimized(clauses, pages, max_clause_size)
         logger.info(f"Prepared {len(chunked_clauses)} chunked clauses for embedding")
         
         sqlite = SQLiteClient()
@@ -88,25 +72,8 @@ async def ingest_document_upload(file: UploadFile = File(...)):
         pages = [c.get("page") for c in clauses_with_pages]
 
         max_clause_size = 40000
-        chunked_clauses = []
-        chunked_pages = []
-        for clause_text, clause_page in zip(clauses, pages):
-            if len(clause_text.encode('utf-8')) > max_clause_size:
-                words = clause_text.split()
-                current_chunk = ""
-                for word in words:
-                    if len((current_chunk + " " + word).encode('utf-8')) > max_clause_size:
-                        chunked_clauses.append(current_chunk.strip())
-                        chunked_pages.append(clause_page)
-                        current_chunk = word
-                    else:
-                        current_chunk += " " + word
-                if current_chunk:
-                    chunked_clauses.append(current_chunk.strip())
-                    chunked_pages.append(clause_page)
-            else:
-                chunked_clauses.append(clause_text)
-                chunked_pages.append(clause_page)
+        # Use optimized chunking function
+        chunked_clauses, chunked_pages = chunk_clauses_optimized(clauses, pages, max_clause_size)
         logger.info(f"Prepared {len(chunked_clauses)} chunked clauses for embedding (upload)")
 
         sqlite = SQLiteClient()
