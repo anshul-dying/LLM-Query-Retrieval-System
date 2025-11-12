@@ -32,6 +32,7 @@ class LLMClient:
             "microsoft/phi-3-mini-128k-instruct",
             "qwen/qwen-2.5-7b-instruct",
             # Try with :free suffix
+            "deepseek/deepseek-chat-v3.1:free"
             "google/gemini-flash-1.5:free",
             "meta-llama/llama-3.2-3b-instruct:free",
             "microsoft/phi-3-mini-128k-instruct:free",
@@ -40,7 +41,7 @@ class LLMClient:
             "mistralai/mistral-7b-instruct:free",
             "google/gemini-pro",
             "google/gemini-pro:free",
-            # Fallback to paid models if free ones fail (user can use if they have credits)
+            # Fallback to paid models if free ones fail
             "openai/gpt-3.5-turbo",
             "anthropic/claude-3-haiku"
         ]

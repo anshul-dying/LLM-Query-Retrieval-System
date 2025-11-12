@@ -1,6 +1,7 @@
 # LLM Query Retrieval System - Project Presentation
 
 ## 🎯 Project Overview
+
 **IntelliDocs AI** - A revolutionary single-page document intelligence platform featuring a modern gradient UI with Spline 3D background, real-time chat interface, and precise source references (exact document name and page number).
 
 ---
@@ -8,6 +9,7 @@
 ## 🏗️ System Architecture
 
 ### Backend (FastAPI + Python)
+
 - **Document Processing Engine**: Handles PDF, DOCX, PPTX, Excel, Images, ZIP files
 - **Vector Search**: FAISS-based semantic search with sentence transformers
 - **LLM Integration**: Local Ollama + Cloud fallback (OpenRouter)
@@ -15,6 +17,7 @@
 - **API Endpoints**: RESTful API with CORS support
 
 ### Frontend (Next.js + React)
+
 - **Modern UI**: Single-page application with gradient backgrounds and glassmorphism effects
 - **3D Background**: Interactive Spline scene with animated elements
 - **File Upload**: Drag & drop interface with visual progress bars and file cards
@@ -23,27 +26,161 @@
 
 ---
 
+## 🛠️ Tech Stack
+
+### Backend Technologies
+
+#### **Core Framework & Server**
+
+- **FastAPI** - Modern, high-performance Python web framework for building APIs
+- **Uvicorn** - Lightning-fast ASGI server for production deployment
+- **Python 3.x** - Primary programming language
+
+#### **AI & Machine Learning**
+
+- **FAISS (Facebook AI Similarity Search)** - Efficient vector similarity search library
+- **Sentence Transformers** - State-of-the-art sentence embeddings (All-MiniLM-L6-v2 model)
+- **PyTorch** - Deep learning framework for transformer models
+- **NumPy** - Numerical computing for vector operations
+
+#### **LLM Integration**
+
+- **Ollama** - Local LLM inference server (Qwen3:1.7b model)
+- **OpenRouter API** - Cloud-based LLM gateway with multiple model fallbacks
+  - Google Gemini Flash 1.5
+  - Meta Llama 3.2 3B Instruct
+  - Microsoft Phi-3 Mini
+  - Qwen 2.5 7B Instruct
+  - Mistral 7B Instruct
+  - OpenAI GPT-3.5 Turbo (fallback)
+  - Anthropic Claude 3 Haiku (fallback)
+
+#### **Document Processing**
+
+- **PyPDF2** - PDF text extraction and manipulation
+- **PyMuPDF (fitz)** - Advanced PDF processing with page-level extraction
+- **python-docx** - Microsoft Word document processing
+- **python-pptx** - PowerPoint presentation processing
+- **openpyxl** - Excel spreadsheet reading and writing
+- **Pandas** - Data manipulation and analysis for structured documents
+- **Pillow (PIL)** - Image processing and OCR support
+- **pytesseract** - OCR (Optical Character Recognition) for scanned documents
+- **BeautifulSoup4** - HTML/XML parsing for web documents
+
+#### **Database & Storage**
+
+- **SQLite** - Lightweight, embedded relational database
+  - WAL (Write-Ahead Logging) mode for better concurrency
+  - Optimized indexes for fast queries
+  - Thread-safe connection pooling
+
+#### **Utilities & Libraries**
+
+- **Pydantic** - Data validation and settings management
+- **Loguru** - Advanced logging with structured output
+- **python-dotenv** - Environment variable management
+- **Requests** - HTTP client for API calls
+- **python-multipart** - File upload handling
+
+### Frontend Technologies
+
+#### **Core Framework**
+
+- **Next.js 15** - React framework with App Router and Turbopack
+- **React 19** - Modern UI library with latest features
+- **TypeScript 5** - Type-safe JavaScript for better code quality
+
+#### **Styling & UI**
+
+- **Tailwind CSS 4** - Utility-first CSS framework
+- **tailwindcss-animate** - Animation utilities
+- **tailwind-merge** - Intelligent class merging
+- **CSS3** - Custom animations and glassmorphism effects
+
+#### **UI Components**
+
+- **Radix UI** - Accessible, unstyled component primitives
+  - Accordion, Dialog, Dropdown Menu
+  - Label, Scroll Area, Slot
+  - Tabs, Toast, Tooltip
+- **Lucide React** - Beautiful, customizable icon library
+- **class-variance-authority** - Component variant management
+- **clsx** - Conditional class name utility
+
+#### **Forms & Validation**
+
+- **React Hook Form** - Performant form library
+- **Zod** - TypeScript-first schema validation
+- **@hookform/resolvers** - Form validation resolvers
+
+#### **Data Visualization**
+
+- **Recharts** - Composable charting library for analytics
+
+#### **Notifications**
+
+- **Sonner** - Beautiful toast notifications
+
+#### **Theming**
+
+- **next-themes** - Dark/light mode support
+
+#### **Development Tools**
+
+- **ESLint** - Code linting and quality checks
+- **TypeScript** - Static type checking
+
+### Infrastructure & DevOps
+
+#### **Development**
+
+- **Git** - Version control
+- **Python Virtual Environment (venv)** - Dependency isolation
+- **npm/Node.js** - Frontend package management
+
+#### **Deployment**
+
+- **CORS** - Cross-Origin Resource Sharing enabled
+- **Environment Variables** - Secure configuration management
+- **File System** - Temporary file handling for uploads
+
+### Architecture Patterns
+
+- **RESTful API** - Standard HTTP methods and endpoints
+- **Microservices Architecture** - Modular backend components
+- **Component-Based UI** - Reusable React components
+- **Vector Database Pattern** - FAISS for semantic search
+- **Hybrid LLM Strategy** - Local + Cloud fallback mechanism
+- **Caching Strategy** - MD5-based response caching
+- **Error Handling** - Comprehensive try-catch with graceful degradation
+
+---
+
 ## 🚀 Key Features Implemented
 
 ### 1. Document Ingestion Pipeline
+
 - **Multi-format Support**: PDF, DOCX, PPTX, Excel, Images, ZIP archives
 - **Intelligent Chunking**: Sentence-based segmentation with size limits
 - **Vector Embeddings**: All-MiniLM-L6-v2 model for semantic search
 - **Metadata Tracking**: Document URLs, filenames, timestamps
 
 ### 2. Advanced Query Processing
+
 - **Semantic Search**: FAISS-based similarity matching
 - **Context-Aware Responses**: Document-specific answers
 - **Reference Tracking**: Exact document and page citations
 - **Fallback Mechanisms**: Predefined answers + general knowledge
 
 ### 3. LLM Integration
+
 - **Local Processing**: Ollama integration for privacy
 - **Cloud Fallback**: Multiple OpenRouter models for reliability
 - **Response Caching**: MD5-based caching for efficiency
 - **Rate Limiting**: Intelligent request throttling
 
 ### 4. User Experience
+
 - **Single-Page Interface**: Upload and query in one seamless flow with animated transitions
 - **Real-time Feedback**: Typing indicators, progress bars, and loading animations
 - **Error Handling**: Comprehensive error messages with retry mechanisms
@@ -55,6 +192,7 @@
 ## 📊 Technical Implementation Details
 
 ### Backend Components
+
 ```
 api/
 ├── main.py                 # FastAPI application with CORS
@@ -80,6 +218,7 @@ database/
 ```
 
 ### Frontend Components
+
 ```
 frontend/src/
 ├── app/
@@ -98,6 +237,7 @@ frontend/src/
 ## 🔧 Configuration & Setup
 
 ### Environment Variables
+
 ```bash
 # Backend (.env)
 USE_LOCAL_LLM=true
@@ -112,14 +252,20 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 ```
 
 ### Dependencies
-- **Backend**: FastAPI, FAISS, SentenceTransformers, PyPDF2, python-docx, Ollama, requests
-- **Frontend**: Next.js 15, React 18, Tailwind CSS, Lucide React Icons, Spline React, TypeScript
+
+> **📋 For a complete list of all technologies, libraries, and frameworks, see the [Tech Stack](#️-tech-stack) section above.**
+
+**Key Highlights:**
+
+- **Backend**: FastAPI, FAISS, SentenceTransformers, PyPDF2, python-docx, Ollama, OpenRouter
+- **Frontend**: Next.js 15, React 19, Tailwind CSS 4, Radix UI, Lucide Icons, TypeScript 5
 
 ---
 
 ## 📈 Performance Metrics
 
 ### System Capabilities
+
 - **Document Processing**: 100MB file size limit
 - **Response Time**: <2 seconds average
 - **Concurrent Users**: Supports multiple simultaneous uploads
@@ -127,6 +273,7 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 - **Languages**: 50+ language support via LLM models
 
 ### Scalability Features
+
 - **Vector Index**: Persistent FAISS index for fast retrieval
 - **Caching**: Response caching for repeated queries
 - **Batch Processing**: Multiple questions in single API call
@@ -137,6 +284,7 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 ## 🎨 User Interface Highlights
 
 ### Design Philosophy
+
 - **Modern Aesthetic**: Gradient backgrounds (slate-900 to purple-900) with glassmorphism effects
 - **3D Integration**: Interactive Spline scene as background with animated elements
 - **Intuitive UX**: Single-page workflow with drag & drop file upload
@@ -144,6 +292,7 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 - **Accessibility**: Keyboard navigation and responsive design
 
 ### Key UI Elements
+
 - **Hero Section**: Animated feature carousel with gradient text effects
 - **File Upload Zone**: Drag & drop with visual progress bars and file cards
 - **Chat Interface**: WhatsApp-style messaging with user/assistant avatars
@@ -156,6 +305,7 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 ## 🔍 Demonstration Scenarios
 
 ### Scenario 1: Document Analysis
+
 1. **Upload Interface**: Drag & drop PDF document onto the upload zone
 2. **Visual Feedback**: Watch progress bar and file card appear
 3. **Ask Question**: Type "What is the main conclusion?" in chat
@@ -163,6 +313,7 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 5. **Source Verification**: Click reference to view external document
 
 ### Scenario 2: Multi-Document Query
+
 1. **Batch Upload**: Upload multiple documents (contracts, reports)
 2. **File Management**: See all files in organized grid layout
 3. **Complex Query**: Ask "What are the key terms across all documents?"
@@ -170,6 +321,7 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 5. **Reference Navigation**: Browse citations from different documents
 
 ### Scenario 3: Technical Questions
+
 1. **Technical Docs**: Upload API documentation or technical specs
 2. **Specific Query**: Ask "How do I implement authentication?"
 3. **Code Extraction**: Receive step-by-step implementation guide
@@ -181,18 +333,21 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 ## 🛠️ Development Process
 
 ### Phase 1: Backend Foundation
+
 - ✅ FastAPI application setup
 - ✅ Document processing pipeline
 - ✅ Vector search implementation
 - ✅ Database schema design
 
 ### Phase 2: LLM Integration
+
 - ✅ Local Ollama setup
 - ✅ Cloud fallback implementation
 - ✅ Response caching system
 - ✅ Error handling mechanisms
 
 ### Phase 3: Frontend Development
+
 - ✅ Next.js application setup with TypeScript
 - ✅ Modern gradient UI with glassmorphism effects
 - ✅ Spline 3D background integration
@@ -201,6 +356,7 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 - ✅ API integration with error handling
 
 ### Phase 4: Testing & Optimization
+
 - ✅ Error handling and recovery
 - ✅ Performance optimization
 - ✅ User experience refinement
@@ -211,12 +367,14 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 ## 🎯 Future Enhancements
 
 ### Short-term Improvements
+
 - **PDF Viewer Integration**: In-app document viewing
 - **Export Functionality**: Save conversations and references
 - **User Authentication**: Multi-user support
 - **Advanced Analytics**: Usage statistics and insights
 
 ### Long-term Vision
+
 - **Multi-modal Support**: Image and video analysis
 - **Collaborative Features**: Team workspaces
 - **API Marketplace**: Third-party integrations
@@ -227,21 +385,25 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 ## 📋 Technical Challenges Solved
 
 ### 1. Document Processing
+
 - **Challenge**: Handling multiple file formats with different structures
 - **Solution**: Modular processor with format-specific extractors
 - **Result**: Support for 6+ file types with consistent output
 
 ### 2. Vector Search Accuracy
+
 - **Challenge**: Finding relevant content in large documents
 - **Solution**: Sentence-based chunking with semantic embeddings
 - **Result**: High precision retrieval with context preservation
 
 ### 3. LLM Response Quality
+
 - **Challenge**: Consistent, accurate responses across different models
 - **Solution**: Prompt engineering with fallback mechanisms
 - **Result**: Reliable answers with source citations
 
 ### 4. Real-time User Experience
+
 - **Challenge**: Responsive interface with complex backend operations
 - **Solution**: Async processing with progress indicators
 - **Result**: Smooth user experience with immediate feedback
@@ -251,18 +413,21 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 ## 🏆 Project Achievements
 
 ### Technical Excellence
+
 - **Full-Stack Implementation**: Complete backend and frontend
 - **Modern Architecture**: Microservices with clean separation
 - **Scalable Design**: Handles multiple users and large documents
 - **Error Resilience**: Comprehensive error handling and recovery
 
 ### User Experience
+
 - **Intuitive Interface**: Single-page workflow
 - **Visual Appeal**: Modern design with 3D elements
 - **Responsive Design**: Works on all device sizes
 - **Accessibility**: Keyboard navigation and screen reader support
 
 ### Innovation
+
 - **Hybrid LLM Approach**: Local + cloud processing
 - **Reference Tracking**: Exact source citations
 - **Multi-format Support**: Comprehensive document handling
@@ -273,6 +438,7 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 ## 🎤 Presentation Tips
 
 ### Live Demo Flow
+
 1. **Show the UI**: Highlight the gradient background and Spline 3D scene
 2. **Upload Demo**: Drag & drop a document, show progress bars and file cards
 3. **Chat Interface**: Ask questions and show real-time typing indicators
@@ -281,6 +447,7 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 6. **Mobile View**: Show responsive design on different screen sizes
 
 ### Key Talking Points
+
 - **Problem Solved**: Document analysis with precise references and modern UX
 - **Technical Innovation**: Hybrid LLM approach with local Ollama + cloud fallback
 - **User Experience**: Single-page workflow with 3D background and real-time chat
@@ -289,6 +456,7 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 - **Future Potential**: Extensible architecture for enterprise features
 
 ### Technical Deep Dive
+
 - **Architecture**: Explain the microservices approach
 - **AI Integration**: Detail the LLM pipeline
 - **Performance**: Highlight speed and accuracy metrics
@@ -303,6 +471,7 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 **Documentation**: [Docs URL]
 
 **Team Members**:
+
 - Backend Development: [Your Name]
 - Frontend Development: [Your Name]
 - AI Integration: [Your Name]
@@ -310,4 +479,4 @@ NEXT_PUBLIC_SPLINE_SCENE=your_spline_scene_url
 
 ---
 
-*This project demonstrates advanced full-stack development skills, AI integration expertise, and modern web application architecture. The system is production-ready and showcases innovative approaches to document analysis and user experience design.*
+_This project demonstrates advanced full-stack development skills, AI integration expertise, and modern web application architecture. The system is production-ready and showcases innovative approaches to document analysis and user experience design._
