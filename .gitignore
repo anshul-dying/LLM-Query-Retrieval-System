@@ -216,3 +216,5 @@ Docs/
 
 *.json
 *.db
+
+./faiss_index.bin

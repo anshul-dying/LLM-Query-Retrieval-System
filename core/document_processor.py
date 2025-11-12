@@ -683,26 +683,128 @@ class DocumentProcessor:
                 self._safe_remove_file(temp_file_path)
 
     def _extract_image(self, doc_url: str) -> str:
-        """Extract text from images using OCR"""
+        """Extract text from images using OCR with enhanced preprocessing"""
         temp_file = self._download_file(doc_url, "")
         try:
-            # Open image and perform OCR
+            # Open image
             image = Image.open(temp_file)
+            original_format = image.format
+            original_size = image.size
+            original_mode = image.mode
             
-            # Configure OCR for better accuracy
-            custom_config = r'--oem 3 --psm 6'
-            text = pytesseract.image_to_string(image, config=custom_config)
+            logger.info(f"Processing image: {original_format}, size: {original_size}, mode: {original_mode}")
+            
+            # Preprocess image for better OCR accuracy
+            processed_image = self._preprocess_image_for_ocr(image)
+            
+            # Try multiple OCR configurations for best results
+            ocr_configs = [
+                r'--oem 3 --psm 6',  # Uniform block of text
+                r'--oem 3 --psm 11',  # Sparse text
+                r'--oem 3 --psm 3',  # Fully automatic page segmentation
+                r'--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .,!?;:()[]{}',  # With character whitelist
+            ]
+            
+            best_text = ""
+            best_config = None
+            
+            for config in ocr_configs:
+                try:
+                    text = pytesseract.image_to_string(processed_image, config=config).strip()
+                    if text and len(text) > len(best_text):
+                        best_text = text
+                        best_config = config
+                        logger.debug(f"OCR config {config} extracted {len(text)} characters")
+                except Exception as e:
+                    logger.debug(f"OCR config {config} failed: {e}")
+                    continue
+            
+            # If no text found, try with original image
+            if not best_text or len(best_text) < 10:
+                logger.info("Trying OCR with original image")
+                for config in ocr_configs[:2]:  # Try first two configs
+                    try:
+                        text = pytesseract.image_to_string(image, config=config).strip()
+                        if text and len(text) > len(best_text):
+                            best_text = text
+                            best_config = config
+                    except Exception as e:
+                        logger.debug(f"OCR with original image failed: {e}")
+                        continue
+            
+            # Get detailed OCR data if available
+            ocr_data = None
+            avg_confidence = 0
+            confidence_scores = []
+            try:
+                ocr_data = pytesseract.image_to_data(processed_image, output_type=pytesseract.Output.DICT)
+                confidence_scores = [int(conf) for conf in ocr_data.get('conf', []) if conf != '-1']
+                avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0
+                logger.info(f"OCR average confidence: {avg_confidence:.2f}%")
+            except Exception as e:
+                logger.debug(f"Could not get OCR confidence data: {e}")
             
             # Add image metadata
-            metadata = f"Image Format: {image.format}\n"
-            metadata += f"Image Size: {image.size}\n"
-            metadata += f"Image Mode: {image.mode}\n"
+            metadata = f"Image Format: {original_format}\n"
+            metadata += f"Image Size: {original_size[0]}x{original_size[1]} pixels\n"
+            metadata += f"Image Mode: {original_mode}\n"
+            if confidence_scores:
+                metadata += f"OCR Average Confidence: {avg_confidence:.2f}%\n"
+            if best_config:
+                metadata += f"Best OCR Config: {best_config}\n"
             
-            full_text = f"{metadata}\n--- OCR Text ---\n{text}"
-            logger.info(f"Extracted text from image: {len(text)} characters")
+            full_text = f"{metadata}\n--- OCR Text ---\n{best_text}"
+            logger.info(f"Extracted {len(best_text)} characters from image using OCR")
+            
             return full_text
+        except Exception as e:
+            logger.error(f"Error extracting text from image: {e}")
+            raise
         finally:
             self._safe_remove_file(temp_file)
+    
+    def _preprocess_image_for_ocr(self, image: Image.Image) -> Image.Image:
+        """
+        Preprocess image to improve OCR accuracy.
+        Applies grayscale conversion, contrast enhancement, and noise reduction.
+        """
+        try:
+            # Convert to RGB if necessary (pytesseract works best with RGB)
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            
+            # Convert to grayscale for better OCR (removes color noise)
+            from PIL import ImageEnhance, ImageFilter
+            gray_image = image.convert('L')
+            
+            # Enhance contrast
+            enhancer = ImageEnhance.Contrast(gray_image)
+            enhanced_image = enhancer.enhance(1.5)  # Increase contrast by 50%
+            
+            # Enhance sharpness
+            sharpness_enhancer = ImageEnhance.Sharpness(enhanced_image)
+            sharp_image = sharpness_enhancer.enhance(1.2)  # Increase sharpness by 20%
+            
+            # Apply slight denoising (be careful not to blur text)
+            denoised_image = sharp_image.filter(ImageFilter.MedianFilter(size=3))
+            
+            # If image is too small, upscale it (OCR works better on larger images)
+            width, height = denoised_image.size
+            min_dimension = 300  # Minimum dimension for good OCR
+            if width < min_dimension or height < min_dimension:
+                scale_factor = max(min_dimension / width, min_dimension / height)
+                new_width = int(width * scale_factor)
+                new_height = int(height * scale_factor)
+                denoised_image = denoised_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                logger.debug(f"Upscaled image from {width}x{height} to {new_width}x{new_height} for better OCR")
+            
+            return denoised_image
+        except Exception as e:
+            logger.warning(f"Image preprocessing failed, using original: {e}")
+            # Return original image if preprocessing fails
+            if image.mode != 'RGB':
+                return image.convert('RGB')
+            return image
 
     def _extract_binary(self, doc_url: str) -> str:
         """Extract basic information from binary files"""
